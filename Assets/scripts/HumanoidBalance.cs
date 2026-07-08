@@ -30,7 +30,7 @@ public class HumanoidBalance : MonoBehaviour
     public float getupMagT = 0.2f;
     public float getupAng = 15f;
 
-    [HideInInspector] public BalanceState state = BalanceState.recovering;
+    [HideInInspector] public BalanceState state = BalanceState.active; // BalanceState.recovering; for falling at starting
     [HideInInspector] public HumanoidLegIK ik;
     [HideInInspector] public bool recovering;
 

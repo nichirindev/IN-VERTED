@@ -1,0 +1,134 @@
+// Decompiled with JetBrains decompiler
+// Type: IkEnemy
+// Assembly: Assembly-CSharp, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+// MVID: E7BE5432-1537-4547-9AF4-A899CFBF2707
+// Assembly location: D:\Games\Win64_3\RERUN_Data\Managed\Assembly-CSharp.dll
+
+using DitzelGames.FastIK;
+using UnityEngine;
+
+#nullable disable
+public class IkEnemy : MonoBehaviour
+{
+  public LayerMask whatIsGround;
+  public float heightAboveGround;
+  public FastIKFabric[] legs;
+  private Transform[] legTargets;
+  private Vector3[] targetPositions;
+  private Vector3[] currentPositions;
+  public Vector3 legTargetOffset;
+  public Transform root;
+  private float thresholdDistance;
+  private float[] legProgress;
+  private RigidEnemy rigidEnemy;
+  public float legSpeed = 10f;
+  private Vector3 currentVelocity;
+  public float upAmount = 2f;
+
+  private void Start()
+  {
+    this.rigidEnemy = this.GetComponent<RigidEnemy>();
+    this.legTargets = new Transform[this.legs.Length];
+    this.targetPositions = new Vector3[this.legs.Length];
+    this.currentPositions = new Vector3[this.legs.Length];
+    this.legProgress = new float[this.legs.Length];
+    this.InitLegTargets();
+    if ((double) this.heightAboveGround == 0.0)
+    {
+      this.heightAboveGround = this.legs[0].CompleteLength;
+      this.thresholdDistance = this.heightAboveGround;
+    }
+    this.UpdateLegTargets();
+    this.UpdateCurrentLegPosition(0);
+    this.UpdateCurrentLegPosition(1);
+    this.InvokeRepeating("SlowUpdate", 1f, 1f);
+  }
+
+  private void Update()
+  {
+    this.currentVelocity = this.rigidEnemy.GetVelocity() * this.thresholdDistance;
+    this.UpdateLegTargets();
+    this.UpdateCurrentLegPositions(this.thresholdDistance);
+    this.LerpLegs();
+  }
+
+  private void SlowUpdate() => this.UpdateCurrentLegPositions(this.thresholdDistance * 0.2f);
+
+  private void InitLegTargets()
+  {
+    for (int index = 0; index < this.legs.Length; ++index)
+    {
+      int chainLength = this.legs[index].ChainLength;
+      Transform transform = this.legs[index].transform;
+      for (; chainLength > 0; --chainLength)
+        transform = transform.parent;
+      this.legTargets[index] = transform;
+    }
+  }
+
+  private void UpdateLegTargets()
+  {
+    for (int index = 0; index < this.legTargets.Length; ++index)
+    {
+      Vector3 vector3 = this.legTargets[index].position - this.root.position;
+      RaycastHit hitInfo;
+      if (Physics.Raycast(this.legTargets[index].position + this.legTargetOffset.x * vector3 + this.currentVelocity + Vector3.up, Vector3.down, out hitInfo, 50f, (int) this.whatIsGround))
+        this.targetPositions[index] = hitInfo.point;
+    }
+  }
+
+  private void UpdateCurrentLegPositions(float threshold)
+  {
+    for (int leg = 0; leg < this.legs.Length && (this.OppositeLegGrounded(leg) || (double) this.legProgress[leg] >= 0.0099999997764825821 || (double) this.CheckDistanceFromTargetPoint(leg) >= 4.0); ++leg)
+    {
+      if ((double) this.CheckDistanceFromTargetPoint(leg) > (double) threshold)
+        this.UpdateCurrentLegPosition(leg);
+    }
+  }
+
+  private bool OppositeLegGrounded(int leg)
+  {
+    return (double) this.legProgress[(leg + 1) % this.legs.Length] < 0.0099999997764825821;
+  }
+
+  private float CheckDistanceFromTargetPoint(int leg)
+  {
+    return Vector3.Distance(this.currentPositions[leg], this.targetPositions[leg]);
+  }
+
+  private void UpdateCurrentLegPosition(int leg)
+  {
+    this.currentPositions[leg] = this.targetPositions[leg];
+    this.legProgress[leg] = 1f;
+  }
+
+  private void LerpLegs()
+  {
+    for (int index = 0; index < this.legs.Length; ++index)
+    {
+      Transform target = this.legs[index].Target;
+      this.legProgress[index] = Mathf.Lerp(this.legProgress[index], 0.0f, Time.deltaTime * this.legSpeed);
+      Vector3 vector3 = Vector3.up * this.upAmount * this.legProgress[index];
+      target.position = Vector3.Lerp(target.position, this.currentPositions[index] + vector3, Time.deltaTime * this.legSpeed);
+    }
+  }
+
+  private void OnDrawGizmos()
+  {
+  }
+
+  public void CollectGarbage()
+  {
+    foreach (FastIKFabric leg in this.legs)
+      Object.Destroy((Object) leg.Target.gameObject);
+  }
+
+  public void ForceCurrentPosition(int i)
+  {
+    if (this.legProgress == null)
+      return;
+    double num = (double) this.legProgress[i];
+    this.legProgress[i] = 1f;
+    this.legs[i].Target.position = this.legs[i].transform.position;
+  }
+}

@@ -1,0 +1,316 @@
+// Decompiled with JetBrains decompiler
+// Type: RigidEnemy
+// Assembly: Assembly-CSharp, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+// MVID: E7BE5432-1537-4547-9AF4-A899CFBF2707
+// Assembly location: D:\Games\Win64_3\RERUN_Data\Managed\Assembly-CSharp.dll
+
+using System;
+using UnityEngine;
+
+#nullable disable
+[RequireComponent(typeof (IkEnemy))]
+public class RigidEnemy : MonoBehaviour
+{
+  public Transform root;
+  public Transform head;
+  public Transform torso;
+  private Rigidbody rb;
+  private Rigidbody headRb;
+  private Rigidbody torsoRb;
+  private float force;
+  [HideInInspector]
+  public RigidEnemy.EnemyState state = RigidEnemy.EnemyState.recovering;
+  [HideInInspector]
+  public IkEnemy ik;
+  private Transform[] groundChecks;
+  public bool minOneGrounded;
+  private int nLegs;
+  public float legPushForce = 0.55f;
+  public float groundCheckRadius = 0.2f;
+  public float moveLegsWithSpeedScale = 0.25f;
+  public float moveSpeed = 10f;
+  private float rotationForce = 0.01f;
+  public float maxRotationForce = 0.05f;
+  private float stabilizeForce = 1f;
+  public float recoverTime = 2f;
+  public float recoveryForce = 0.3f;
+  public float tumbleAngle = 30f;
+  public float fallAngle = 70f;
+  public float getupMagT = 0.2f;
+  public float getupAng = 15f;
+  private bool ragdoll;
+  [HideInInspector]
+  public bool recovering;
+
+  private void Start()
+  {
+    this.rb = this.root.GetComponent<Rigidbody>();
+    this.headRb = !(bool) (UnityEngine.Object) this.head ? this.rb : this.head.GetComponent<Rigidbody>();
+    this.torsoRb = !(bool) (UnityEngine.Object) this.torso ? this.rb : this.torso.GetComponent<Rigidbody>();
+    this.ik = this.GetComponent<IkEnemy>();
+    this.CaluclateForce();
+    this.UpdateState(RigidEnemy.EnemyState.active);
+    this.nLegs = this.ik.legs.Length;
+    this.groundChecks = new Transform[this.nLegs];
+    for (int index = 0; index < this.nLegs; ++index)
+      this.groundChecks[index] = this.ik.legs[index].transform;
+    this.DisableSelfCollision(true);
+  }
+
+  private void FixedUpdate()
+  {
+    if (this.state == RigidEnemy.EnemyState.dead)
+      return;
+    this.minOneGrounded = false;
+    for (int index = 0; index < this.nLegs; ++index)
+    {
+      if (Physics.CheckSphere(this.groundChecks[index].position, this.groundCheckRadius, (int) this.ik.whatIsGround))
+        this.minOneGrounded = true;
+    }
+    float num1 = 0.0f;
+    if (this.state == RigidEnemy.EnemyState.active || this.state == RigidEnemy.EnemyState.tumbling || this.state == RigidEnemy.EnemyState.recovering || this.state == RigidEnemy.EnemyState.falling)
+    {
+      RaycastHit hitInfo;
+      if (!Physics.Raycast(this.root.position, Vector3.down, out hitInfo, this.ik.heightAboveGround * 3f, (int) this.ik.whatIsGround))
+        this.UpdateState(RigidEnemy.EnemyState.falling);
+      else
+        num1 = hitInfo.distance;
+    }
+    float num2 = Vector3.Angle(Vector3.up, this.root.up);
+    if (this.state == RigidEnemy.EnemyState.falling)
+    {
+      if ((double) num1 != 0.0 && (double) num1 < (double) this.ik.heightAboveGround * 1.5 && (double) num2 < 50.0)
+      {
+        this.UpdateState(RigidEnemy.EnemyState.active);
+        this.CancelInvoke("GetUp");
+        this.ConfigureLegs(false);
+        this.recovering = false;
+      }
+      else
+      {
+        if (this.IsInvoking("GetUp"))
+          return;
+        this.Invoke("GetUp", this.recoverTime);
+      }
+    }
+    else if (this.state == RigidEnemy.EnemyState.recovering)
+    {
+      bool flag = Physics.CheckSphere(this.root.position, 0.5f, (int) this.ik.whatIsGround);
+      if ((double) num1 < (double) this.ik.heightAboveGround | flag)
+      {
+        this.headRb.AddForce(Vector3.up * this.force * this.recoveryForce * 1.1f);
+        this.rb.AddForce(Vector3.up * this.force * this.recoveryForce * 0.9f);
+      }
+      if (((double) num2 >= (double) this.getupAng || (double) this.torsoRb.velocity.magnitude >= (double) this.getupMagT) && ((double) num1 <= (double) this.ik.heightAboveGround * 0.85000002384185791 || (double) num1 >= (double) this.ik.heightAboveGround * 1.8500000238418579 || (double) num2 >= 30.0))
+        return;
+      this.UpdateState(RigidEnemy.EnemyState.active);
+      this.CancelInvoke("RecoveryCooldown");
+      this.Invoke("RecoveryCooldown", 2f);
+    }
+    else if (this.state == RigidEnemy.EnemyState.active && (double) this.rb.velocity.magnitude < 1.0 && (double) num1 > (double) this.ik.heightAboveGround && (double) num1 < (double) this.ik.heightAboveGround + (double) this.ik.heightAboveGround * 0.10000000149011612)
+    {
+      this.headRb.AddForce(Vector3.up * this.force * 0.86f);
+    }
+    else
+    {
+      float num3 = Mathf.Clamp((float) (1.0 - (double) this.RootHeight() / (double) this.ik.heightAboveGround), -1f, 1f);
+      if ((double) num2 < (double) this.tumbleAngle)
+        this.UpdateState(RigidEnemy.EnemyState.active);
+      else if ((double) num2 < (double) this.fallAngle)
+        this.UpdateState(RigidEnemy.EnemyState.tumbling);
+      else if ((double) num2 > (double) this.fallAngle)
+        this.UpdateState(RigidEnemy.EnemyState.falling);
+      if (this.minOneGrounded)
+      {
+        this.rb.AddForce(this.root.up * this.force * num3 * 2f);
+        this.rb.AddForce(this.root.up * this.force * this.legPushForce);
+      }
+      if ((double) num1 >= (double) this.ik.heightAboveGround * 2.0)
+        return;
+      this.StabilizingBody();
+    }
+  }
+
+  private void RecoveryCooldown() => this.recovering = false;
+
+  public void Concuss()
+  {
+    this.UpdateState(RigidEnemy.EnemyState.falling);
+    this.ConfigureLegs(true);
+    this.recovering = true;
+    this.Invoke("GetUp", this.recoverTime * UnityEngine.Random.Range(0.7f, 1.5f));
+  }
+
+  private void GetUp()
+  {
+    if (Physics.CheckSphere(this.root.position, this.ik.heightAboveGround * 0.5f, (int) this.ik.whatIsGround))
+    {
+      this.UpdateState(RigidEnemy.EnemyState.recovering);
+      this.ConfigureLegs(false);
+    }
+    else
+      this.Invoke(nameof (GetUp), this.recoverTime);
+  }
+
+  private void ConfigureLegs(bool makeRagdoll)
+  {
+    if (makeRagdoll == this.ragdoll)
+      return;
+    this.ragdoll = makeRagdoll;
+    for (int i = 0; i < this.ik.legs.Length; ++i)
+    {
+      int chainLength = this.ik.legs[i].ChainLength;
+      Transform transform = this.ik.legs[i].transform;
+      for (; chainLength > 0; --chainLength)
+      {
+        transform = transform.parent;
+        if (makeRagdoll)
+          transform.gameObject.AddComponent<CharacterJoint>().connectedBody = transform.parent.GetComponent<Rigidbody>();
+        else
+          UnityEngine.Object.Destroy((UnityEngine.Object) transform.gameObject.GetComponent<Joint>());
+      }
+      foreach (Rigidbody componentsInChild in transform.GetComponentsInChildren<Rigidbody>())
+      {
+        componentsInChild.isKinematic = !makeRagdoll;
+        componentsInChild.interpolation = makeRagdoll ? RigidbodyInterpolation.Interpolate : RigidbodyInterpolation.None;
+      }
+      this.ik.legs[i].enabled = !makeRagdoll;
+      this.ik.ForceCurrentPosition(i);
+    }
+  }
+
+  private float RootHeight()
+  {
+    RaycastHit hitInfo;
+    return Physics.Raycast(this.root.position, Vector3.down, out hitInfo, 10f, (int) this.ik.whatIsGround) ? hitInfo.distance : 0.0f;
+  }
+
+  private void StabilizingBody()
+  {
+    this.headRb.AddForce(Vector3.up * this.force * this.stabilizeForce);
+    this.torsoRb.AddForce(Vector3.down * this.force * this.stabilizeForce);
+  }
+
+  private void CaluclateForce()
+  {
+    float num = 0.0f;
+    foreach (Rigidbody componentsInChild in this.GetComponentsInChildren<Rigidbody>())
+    {
+      if (!componentsInChild.isKinematic)
+        num += componentsInChild.mass;
+    }
+    this.force = num * -Physics.gravity.y;
+  }
+
+  public void RotateBody(Vector3 dir)
+  {
+    this.rb.AddTorque(Vector3.up * Mathf.Clamp(Mathf.DeltaAngle(this.root.transform.eulerAngles.y, Quaternion.LookRotation(dir).eulerAngles.y), -2f, 2f) * this.force * this.rotationForce);
+  }
+
+  public void MoveBody(Vector3 dir)
+  {
+    this.rb.AddForce(dir * this.moveSpeed * this.rb.mass);
+    this.headRb.AddForce(dir * this.moveSpeed * this.headRb.mass);
+    this.torsoRb.AddForce(dir * this.moveSpeed * this.torsoRb.mass);
+  }
+
+  public void UpdateState(RigidEnemy.EnemyState s)
+  {
+    if (this.state == s)
+      return;
+    this.state = s;
+    switch (s)
+    {
+      case RigidEnemy.EnemyState.active:
+        this.ConfigureRb(5f, 5f, this.maxRotationForce, 1f);
+        break;
+      case RigidEnemy.EnemyState.tumbling:
+        this.ConfigureRb(1f, 4f, 0.0f, 0.1f);
+        break;
+      case RigidEnemy.EnemyState.falling:
+        this.ConfigureRb(0.0f, 0.0f, 0.0f, 0.0f);
+        this.Concuss();
+        break;
+      case RigidEnemy.EnemyState.recovering:
+        this.ConfigureRb(4f, 4f, this.maxRotationForce, 0.15f);
+        break;
+      case RigidEnemy.EnemyState.dead:
+        this.ConfigureRb(0.0f, 0.0f, 0.0f, 0.0f);
+        this.KillRigidEnemy();
+        break;
+      default:
+        this.rb.drag = 0.0f;
+        this.rb.angularDrag = 0.0f;
+        break;
+    }
+  }
+
+  public void KillRigidEnemy()
+  {
+    this.DisableSelfCollision(false);
+    this.ConfigureLegs(true);
+    this.CancelInvoke();
+    foreach (Transform componentsInChild in this.transform.GetComponentsInChildren<Transform>())
+    {
+      if (componentsInChild.CompareTag("GrapplePoint"))
+        UnityEngine.Object.Destroy((UnityEngine.Object) componentsInChild.gameObject);
+      componentsInChild.tag = "Dead";
+    }
+    this.ik.CollectGarbage();
+    this.gameObject.AddComponent<global::DestroyObject>().time = 10f;
+    UnityEngine.Object.Destroy((UnityEngine.Object) this);
+    UnityEngine.Object.Destroy((UnityEngine.Object) this.ik);
+  }
+
+  private void ConfigureRb(float drag, float angularDrag, float rotation, float stabilize)
+  {
+    if ((double) drag != -1.0)
+    {
+      this.rb.drag = drag;
+      this.torsoRb.drag = drag;
+    }
+    if ((double) angularDrag != -1.0)
+    {
+      this.rb.angularDrag = angularDrag;
+      this.torsoRb.angularDrag = angularDrag;
+    }
+    if ((double) this.rotationForce != -1.0)
+      this.rotationForce = rotation;
+    if ((double) stabilize == -1.0)
+      return;
+    this.stabilizeForce = stabilize;
+  }
+
+  public Vector3 GetVelocity()
+  {
+    if (!(bool) (UnityEngine.Object) this.rb)
+      return Vector3.zero;
+    Vector3 vector3 = this.rb.velocity * this.moveLegsWithSpeedScale;
+    return (double) vector3.magnitude > 1.0 ? vector3.normalized : vector3;
+  }
+
+  private void DisableSelfCollision(bool ignore)
+  {
+    try
+    {
+      Collider[] componentsInChildren = this.GetComponentsInChildren<Collider>();
+      for (int index1 = 0; index1 < componentsInChildren.Length; ++index1)
+      {
+        for (int index2 = index1; index2 < componentsInChildren.Length; ++index2)
+          Physics.IgnoreCollision(componentsInChildren[index1], componentsInChildren[index2], ignore);
+      }
+    }
+    catch (Exception ex)
+    {
+    }
+  }
+
+  public enum EnemyState
+  {
+    active,
+    tumbling,
+    falling,
+    recovering,
+    dead,
+  }
+}

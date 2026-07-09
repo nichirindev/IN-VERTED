@@ -1,0 +1,227 @@
+# IN-VERTED Project Reference
+# Last updated: July 2026
+
+## Engine
+- Unity 2022.3.62f2 LTS
+- Universal Render Pipeline (URP) 14.0.12
+- C# 10
+
+## Project Structure
+```
+Assets/
+├── scripts/
+│   ├── PlayerMovement.cs      # FPS controller (WASD, jump, slide)
+│   ├── PlayerInput.cs          # Mouse look + keyboard input
+│   ├── MoveCamera.cs           # Camera follow + landing bob
+│   ├── VectorExtensions.cs     # XZVector() helper
+│   ├── HumanoidBalance.cs      # Ragdoll self-balancing enemy
+│   ├── HumanoidLegIK.cs        # 2-leg procedural IK (FastIK)
+│   ├── DestroyObject.cs        # Timed self-destruct
+│   ├── EnemyAI.cs              # Enemy detection + attack trigger
+│   ├── EnemyAttack.cs          # Procedural sword swing
+│   ├── PlayerHealth.cs         # Player health + respawn
+│   └── Sword.cs                # Sword trigger damage
+├── FastIK/                     # FABRIK IK solver (DitzelGames)
+│   └── Scripts/FastIK/
+│       └── FastIKFabric.cs     # ChainLength, Target, Pole fields
+└── EZ Camera Shake/            # Camera shake utility
+```
+
+## Player Scripts
+
+### PlayerMovement.cs
+- Rigidbody-based FPS controller
+- Forces: moveSpeed=6000, maxSpeed=22, jumpForce=13
+- Crouch: scale Y=0.5, position offset calculated from playerHeight
+- Slide: slideForce=800 when crouching at speed
+- Counter-movement: stops sliding when no input
+- Ramp movement: disables gravity on ramps when stationary
+- Air control: 0.6x multiplier when airborne
+- Ground detection: OnCollisionStay with delay-based timeout
+- Requires: Rigidbody, CapsuleCollider, whatIsGround LayerMask
+- Singleton: PlayerMovement.Instance
+
+### PlayerInput.cs
+- WASD via Input.GetAxisRaw
+- Mouse look with sensitivity=50
+- Jump: Input.GetButton("Jump")
+- Crouch: LeftControl or C key
+- Feeds input to PlayerMovement.SetInput() in Update
+- Calls PlayerMovement.Movement() in FixedUpdate
+- Singleton: PlayerInput.Instance
+
+### MoveCamera.cs
+- Follows player.position + bobOffset
+- Landing bob: BobOnce() triggered from PlayerMovement.OnCollisionEnter
+- Bob decays via Lerp in UpdateBob()
+- Crouch tilt: 6 degrees Z rotation when crouching
+- Cinematic mode: disables mouse look
+- Singleton: MoveCamera.Instance
+
+### VectorExtensions.cs
+- XZVector(): returns Vector3 with Y=0
+
+### PlayerHealth.cs
+- Health system with maxHealth=100
+- TakeDamage(amount) reduces health, calls Die() at 0
+- Die() sets PlayerMovement.dead=true, disables input, starts respawn
+- RespawnCoroutine() teleports to respawnPoint after respawnDelay (2s)
+- Heal(amount) restores health
+- Events: OnHealthChanged(current, max), OnPlayerDied
+- Requires: PlayerMovement on same GameObject
+
+## Enemy Scripts
+
+### HumanoidBalance.cs
+- States: active, tumbling, falling, recovering, dead
+- Balance: StabilizingBody() pushes head up, torso down
+- Tumble at 30°, fall at 70° (configurable)
+- Recovery: upward forces on head+hips, waits for stabilization
+- Ragdoll toggle: ConfigureLegs() adds/removes CharacterJoints
+- Concuss(): triggers full ragdoll + auto-recovery after recoverTime
+- Kill(): full ragdoll, tags children "Dead", self-destructs after 10s
+- Fields: root (hips), head, torso (chest)
+- Singleton: none (per-instance)
+
+### HumanoidLegIK.cs
+- Uses FastIKFabric[] legs (direct array, no wrapper)
+- Ground detection: raycast from leg root downward
+- Foot placement: raycast from hip + velocity offset
+- Stepping: opposite leg must be grounded before lifting
+- Arc motion: upAmount * legProgress for natural step lift
+- Foot rotation: matches root.forward projected to ground
+- Leg speed: 10, upAmount: 2
+- Singleton: none (per-instance)
+
+### EnemyAI.cs
+- Runs in FixedUpdate to match physics loop
+- Uses OverlapSphere to find player within detectionRange (10)
+- Rotates enemy to face player using HumanoidBalance.RotateBody() (physics torque)
+- Triggers EnemyAttack.Swing() when player within attackRange (2.5)
+- Cooldown between attacks: attackCooldown (1.5s)
+- Pauses during falling/tumbling/dead states
+- Requires: EnemyAttack, HumanoidBalance
+
+### EnemyAttack.cs
+- Procedural sword swing via coroutine (no animation clips)
+- Auto-finds right hand bone: searches for "RightHand" or "mixamorig:RightHand"
+- Rotates rightHand.localRotation through swingAngle (90°) on swingAxis (Vector3.right)
+- Swing: smoothstep lerp over swingDuration (0.3s)
+- Return: smoothstep lerp back over returnDuration (0.2s)
+- Sets isSwinging=true during swing (used by Sword.cs for damage)
+- Requires: rightHand bone (auto-detected or assigned in Inspector)
+
+### Sword.cs
+- Trigger collider damage dealer
+- OnTriggerEnter: checks if parentEnemyAttack.isSwinging
+- If swinging + hits PlayerHealth → TakeDamage(damage) + knockback force
+- hitPlayer flag prevents multi-hit per swing (resets after 0.5s)
+- Auto-finds EnemyAttack component at Awake()
+- Requires: BoxCollider with isTrigger=true, EnemyAttack in parent hierarchy
+
+## Setup: Ragdoll Enemy (Mixamo rig)
+1. Add HumanoidBalance + HumanoidLegIK + EnemyAI + EnemyAttack to Mixamo Rig root
+2. Add FastIKFabric to LeftFoot (ChainLength=2) and RightFoot (ChainLength=2)
+3. Create knee pole targets in front of each knee
+4. Assign in Inspector:
+   - Root = Mixamorig:Hips
+   - Head = Mixamorig:Head
+   - Torso = Mixamorig:Spine2
+   - Legs[0] = LeftFoot FastIKFabric
+   - Legs[1] = RightFoot FastIKFabric
+   - whatIsGround = Ground layer
+   - EnemyAI.playerLayer = Player layer
+5. Each bone needs: Rigidbody + CapsuleCollider + CharacterJoint
+6. Hips Rigidbody: isKinematic=false, mass=3-5
+7. Foot Rigidbodies: isKinematic=true (IK controls them)
+
+## Setup: Sword
+1. Create sword mesh as child of Mixamorig:RightHand
+2. Add BoxCollider → check Is Trigger
+3. Add Sword.cs component
+4. parentEnemyAttack auto-finds EnemyAttack in parent hierarchy
+5. rightHand auto-detected by EnemyAttack via bone name search
+
+## Setup: Player
+1. Create player GameObject with Rigidbody + CapsuleCollider
+2. Add PlayerMovement + PlayerInput + PlayerHealth
+3. Create empty child "Orientation" (rotated by mouse look)
+4. Create Camera parent with MoveCamera, assign player + playerInput
+5. Assign whatIsGround = Ground layer
+6. Assign PlayerHealth.respawnPoint (empty GO at spawn)
+7. Set player GameObject to "Player" layer
+8. Rigidbody: useGravity=true, interpolation=Interpolate
+
+## Tuning Values
+
+### Player Movement
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| moveSpeed | 6000 | Ground movement force |
+| maxSpeed | 22 | Horizontal speed cap |
+| jumpForce | 13 | Jump impulse |
+| slideForce | 800 | Slide boost force |
+| counterMovement | 0.14 | Stop friction |
+| slideCounterMovement | 0.12 | Slide friction |
+| maxSlopeAngle | 35 | Walkable slope limit |
+| crouchScale.y | 0.5 | Crouch height multiplier |
+
+### Enemy Balance
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| stabilizeForce | 1 | Head up / torso down force |
+| legPushForce | 0.55 | Upward leg push |
+| tumbleAngle | 30 | Tumble trigger angle |
+| fallAngle | 70 | Full ragdoll angle |
+| recoverTime | 2 | Seconds before recovery |
+| recoveryForce | 0.3 | Upward recovery force |
+| legSpeed | 10 | Foot step speed |
+| upAmount | 2 | Step arc height |
+
+### Enemy AI
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| detectionRange | 10 | Sphere overlap to detect player |
+| attackRange | 2.5 | Distance to trigger sword swing |
+| attackCooldown | 1.5 | Seconds between attacks |
+
+### Enemy Attack
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| swingAngle | 90 | Arc degrees of sword swing |
+| swingDuration | 0.3 | Time for forward swing (seconds) |
+| returnDuration | 0.2 | Time for return swing (seconds) |
+| swingAxis | Vector3.right | Local axis to rotate around |
+| damage | 25 | Damage per hit |
+| knockbackForce | 8 | Impulse force on hit |
+
+### Player Health
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| maxHealth | 100 | Maximum player health |
+| respawnDelay | 2 | Seconds before respawn |
+
+## Key Interactions
+- PlayerMovement.OnCollisionEnter → MoveCamera.BobOnce (landing camera dip)
+- PlayerInput.Update → PlayerMovement.SetInput
+- PlayerInput.FixedUpdate → PlayerMovement.Movement
+- HumanoidBalance.UpdateState(Falling) → Concuss() → ConfigureLegs(true)
+- HumanoidBalance.GetUp() → ConfigureLegs(false) → IK resumes
+- HumanoidLegIK.Update → balance.GetVelocity() for movement offset
+- EnemyAI.FixedUpdate → FindTarget() → balance.RotateBody() → EnemyAttack.Swing()
+- EnemyAttack.Swing() → coroutine rotates rightHand → isSwinging=true
+- Sword.OnTriggerEnter → if isSwinging → PlayerHealth.TakeDamage()
+- PlayerHealth.Die() → PlayerMovement.dead=true → RespawnCoroutine()
+
+## Third-Party Dependencies
+- FastIK (FABRIK solver) - included in project
+- EZ Camera Shake - included in project
+- Unity Animation Rigging 1.2.1 - in packages (not currently used)
+
+## Known: Removed Scripts
+- AlideAudio.cs (slide audio) - deleted
+- GameManager.cs - deleted
+- PlayerPowers.cs - deleted
+- GameState.cs - deleted
+- GameDebug.cs - deleted
+- RigidEnemy.cs / IkEnemy.cs - original decompiled, renamed to .bak then deleted

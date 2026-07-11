@@ -10,6 +10,8 @@ public class Sword : MonoBehaviour
     public float knockbackForce = 8f;
     public bool hitPlayer;
 
+    private bool wasSwinging;
+
     private void Reset()
     {
         if (parentEnemyAttack == null)
@@ -22,7 +24,18 @@ public class Sword : MonoBehaviour
             parentEnemyAttack = GetComponentInParent<EnemyAttack>();
     }
 
-    private void OnTriggerEnter(Collider other)
+    private void Update()
+    {
+        if (parentEnemyAttack == null) return;
+
+        if (parentEnemyAttack.isSwinging && !wasSwinging)
+        {
+            hitPlayer = false;
+        }
+        wasSwinging = parentEnemyAttack.isSwinging;
+    }
+
+    private void OnTriggerStay(Collider other)
     {
         if (parentEnemyAttack == null || !parentEnemyAttack.isSwinging)
             return;
@@ -50,12 +63,6 @@ public class Sword : MonoBehaviour
             }
 
             hitPlayer = true;
-            Invoke(nameof(ResetHit), 0.5f);
         }
-    }
-
-    private void ResetHit()
-    {
-        hitPlayer = false;
     }
 }
